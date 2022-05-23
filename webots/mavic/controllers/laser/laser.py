@@ -6,6 +6,7 @@ from controller import Robot
 from controller import Lidar, LidarPoint, Camera, Compass, GPS, Gyro, InertialUnit, Keyboard, LED, Motor
 import os
 import numpy as np
+import cv2
 
 FOLDER = './data/'
 
@@ -111,6 +112,10 @@ if __name__ == '__main__':
         #  val = ds.getValue()
         time = robot.getTime()
 
+        '''camera img'''
+        # cameraData = np.array(camera.getImageArray())
+        # print(cameraData.shape)
+
         # Retrieve robot position using the sensors.
         roll = imu.getRollPitchYaw()[0]
         pitch = imu.getRollPitchYaw()[1]
@@ -157,7 +162,8 @@ if __name__ == '__main__':
         '''lidar'''
         try:
             Cloud = lidar.getPointCloud()  #获取点数组
-            WriteIntoFile(Cloud, FOLDER + str(Cloud[1].time) + '.txt')
+            # TODO: write into file
+            # WriteIntoFile(Cloud, FOLDER + str(Cloud[1].time) + '.txt')
             # print(Cloud[1].time)
         except Exception as e:
             print(e)
@@ -181,6 +187,7 @@ if __name__ == '__main__':
         front_right_motor.setVelocity(-front_right_motor_input)
         rear_left_motor.setVelocity(-rear_left_motor_input)
         rear_right_motor.setVelocity(rear_right_motor_input)
+        # print(front_left_motor_input, front_right_motor_input, rear_left_motor_input, rear_right_motor_input)
         pass
 
     # Enter here exit cleanup code.
