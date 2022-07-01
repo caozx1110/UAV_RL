@@ -10,6 +10,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 import numpy as np
 from torch import manual_seed
 from collections import namedtuple
+import torch
 
 Transition = namedtuple('Transition', ['state', 'action', 'a_log_prob', 'reward', 'next_state'])
 
@@ -67,6 +68,12 @@ class PPOAgent:
 
         with no_grad():
             action_prob = self.actor_net(agentInput)
+
+        with no_grad():
+            mu, sigma = self.actor_net(agentInput)
+            dis = torch.distributions.normal.Normal(mu, sigma)        #构建分布
+            a = dis.sample()   #采样出一个动作
+        return a.item()
 
         if type_ == "selectAction":
             c = Categorical(action_prob)
@@ -177,13 +184,34 @@ class PPOAgent:
 
 
 class Actor(nn.Module):
-    def __init__(self, numberOfInputs, numberOfOutputs):
+    def __init__(self, numberOfInputs=None, numberOfOutputs=None):
         super(Actor, self).__init__()
-        self.fc1 = nn.Linear(numberOfInputs, 10)
+        self.conv_channel = nn.Sequential(
+            # 3 x 240 x 400
+            nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            # 8 x 60 x 100
+            nn.Conv2d(in_channels=8, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            # 8 x 15 x 25
+            nn.Conv2d(in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(3, 5), stride=4),
+            # 1 x 4 x 6
+        )
+        self.img_fc1 = nn.Linear(1 * 4 * 6, 4)
+        self.img_fc2 = nn.Linear(1 * 4 * 6, 4)
         self.fc2 = nn.Linear(10, 10)
         self.action_head = nn.Linear(10, numberOfOutputs)
 
-    def forward(self, x):
+    def forward(self, img, imu):
+        img = self.conv_channel(img)
+        img = img.view(img.size(0), -1)
+        sigma = self.img_fc1(img)   # sigma[4]
+        mu = self.img_fc2(img)      # mu[4]
+
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         action_prob = F.softmax(self.action_head(x), dim=1)
@@ -191,7 +219,7 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, numberOfInputs):
+    def __init__(self, numberOfInputs=None):
         super(Critic, self).__init__()
         self.fc1 = nn.Linear(numberOfInputs, 10)
         self.fc2 = nn.Linear(10, 10)

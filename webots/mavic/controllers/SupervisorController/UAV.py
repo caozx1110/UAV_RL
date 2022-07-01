@@ -73,12 +73,15 @@ class UAV(RobotSupervisor):
         """
         get observations from the robot
 
-        :return: the camera image 400 x 240 x 3
+        :return: the camera image 3 x 240 x 400, the imu data
         """
         # 400 x 240 x 3
-        camera_data = self.np.array(self.camera.getImageArray())
+        camera_data_whc = np.array(self.camera.getImageArray())
+        # 3 x 240 x 400
+        camera_data_chw = np.transpose(camera_data_whc, (2, 1, 0))
+        rpy_data = np.array(self.imu.getRollPitchYaw())
 
-        return camera_data
+        return camera_data_chw, rpy_data
 
     def get_reward(self, action=None):
         """
