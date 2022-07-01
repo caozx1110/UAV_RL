@@ -137,8 +137,9 @@ class UAV(RobotSupervisor):
 
         :param action: the action to be executed
         """
+        action = action[0]
         for i in range(4):
-            # self.motors[i].setPosition(np.inf)
+            self.motors[i].setPosition(np.inf)
             self.motors[i].setVelocity(action[i])
 
     def render(self, mode='human'):

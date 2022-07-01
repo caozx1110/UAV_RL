@@ -61,26 +61,34 @@ class PPOAgent:
         :param type_: "selectAction" or "selectActionMax", defaults to "selectAction"
         :type type_: str, optional
         """
-        agentInput = from_numpy(np.array(agentInput)).float().unsqueeze(0)  # Add batch dimension with unsqueeze
-
+        for i in range(2):
+            agentInput[i] = from_numpy(np.array(agentInput[i])).float().unsqueeze(0)  # Add batch dimension with unsqueeze
+        
         if self.use_cuda:
-            agentInput = agentInput.cuda()
+            for i in range(2):
+                agentInput[i] = agentInput[i].cuda()
 
         with no_grad():
-            action_prob = self.actor_net(agentInput)
+            mu, sigma = self.actor_net(agentInput[0], agentInput[1])
+            # for i in range(4):
+            #     dis = torch.distributions.normal.Normal(mu, sigma)        # 构建分布
+            #     action = dis.sample()   # 采样出一个动作
+            #     action_log_prob = dis.log_prob(action)
+            #     # append
+            #     action_list.append(action)
+            #     action_prob_list.append(action_log_prob)
+            dis = torch.distributions.MultivariateNormal(mu, torch.diag_embed(sigma))   # 构建分布
+            action = dis.sample()   # 采样出一个动作
+            action_log_prob = dis.log_prob(action)  # 计算动作的概率
+        
+        return action, action_log_prob
 
-        with no_grad():
-            mu, sigma = self.actor_net(agentInput)
-            dis = torch.distributions.normal.Normal(mu, sigma)        #构建分布
-            a = dis.sample()   #采样出一个动作
-        return a.item()
-
-        if type_ == "selectAction":
-            c = Categorical(action_prob)
-            action = c.sample()
-            return action.item(), action_prob[:, action.item()].item()
-        elif type_ == "selectActionMax":
-            return np.argmax(action_prob).item(), 1.0
+        # if type_ == "selectAction":
+        #     c = Categorical(action_prob)
+        #     action = c.sample()
+        #     return action.item(), action_prob[:, action.item()].item()
+        # elif type_ == "selectActionMax":
+        #     return np.argmax(action_prob).item(), 1.0
 
     def save(self, path):
         """
@@ -184,9 +192,13 @@ class PPOAgent:
 
 
 class Actor(nn.Module):
+    """
+    Actor network for the actor-critic algorithm.
+    """
     def __init__(self, numberOfInputs=None, numberOfOutputs=None):
         super(Actor, self).__init__()
-        self.conv_channel = nn.Sequential(
+        # img
+        self.img_channel = nn.Sequential(
             # 3 x 240 x 400
             nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
@@ -201,32 +213,73 @@ class Actor(nn.Module):
             nn.MaxPool2d(kernel_size=(3, 5), stride=4),
             # 1 x 4 x 6
         )
-        self.img_fc1 = nn.Linear(1 * 4 * 6, 4)
-        self.img_fc2 = nn.Linear(1 * 4 * 6, 4)
-        self.fc2 = nn.Linear(10, 10)
-        self.action_head = nn.Linear(10, numberOfOutputs)
+        # imu
+        self.imu_channel = nn.Sequential(
+            nn.Linear(3, 8),
+            nn.ReLU(),
+            nn.Linear(8, 12),
+            nn.ReLU(),
+        )
+
+        self.fc1 = nn.Linear(24 + 12, 4)
+        self.fc2 = nn.Linear(24 + 12, 4)
 
     def forward(self, img, imu):
-        img = self.conv_channel(img)
-        img = img.view(img.size(0), -1)
-        sigma = self.img_fc1(img)   # sigma[4]
-        mu = self.img_fc2(img)      # mu[4]
+        # img
+        img = self.img_channel(img)
+        img = img.view(img.size(0), -1) # 24
+        # imu
+        imu = self.imu_channel(imu) # 12
+        # cat
+        img_imu = torch.cat((img, imu), 1)
+        # sigma & mu
+        sigma = self.fc1(img_imu)   # sigma[4]
+        mu = self.fc2(img_imu)      # mu[4]
 
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        action_prob = F.softmax(self.action_head(x), dim=1)
-        return action_prob
+        return sigma, mu
 
 
 class Critic(nn.Module):
+    """
+    Critic network for the actor-critic algorithm.
+    """
     def __init__(self, numberOfInputs=None):
         super(Critic, self).__init__()
-        self.fc1 = nn.Linear(numberOfInputs, 10)
-        self.fc2 = nn.Linear(10, 10)
-        self.state_value = nn.Linear(10, 1)
+        # img
+        self.img_channel = nn.Sequential(
+            # 3 x 240 x 400
+            nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            # 8 x 60 x 100
+            nn.Conv2d(in_channels=8, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=4, stride=4),
+            # 8 x 15 x 25
+            nn.Conv2d(in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(3, 5), stride=4),
+            # 1 x 4 x 6
+        )
+        # imu
+        self.imu_channel = nn.Sequential(
+            nn.Linear(3, 8),
+            nn.ReLU(),
+            nn.Linear(8, 12),
+            nn.ReLU(),
+        )
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        value = self.state_value(x)
+        self.fc1 = nn.Linear(24 + 12, 1)
+
+    def forward(self, img, imu):
+        # img
+        img = self.img_channel(img)
+        img = img.view(img.size(0), -1) # 24
+        # imu
+        imu = self.imu_channel(imu) # 12
+        # cat
+        img_imu = torch.cat((img, imu), 1)
+        # value
+        value = self.fc1(img_imu)
+
         return value
