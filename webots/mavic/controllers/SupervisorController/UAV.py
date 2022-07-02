@@ -41,9 +41,12 @@ class UAV(RobotSupervisor):
             self.front_left_motor, self.front_right_motor,
             self.rear_left_motor, self.rear_right_motor
         ]
+
+        # v: + - - + 垂直起飞
+        self.Sign = [+1, -1, -1, +1]
         for i in range(4):
             self.motors[i].setPosition(np.inf)
-            self.motors[i].setVelocity(1.0)
+            self.motors[i].setVelocity(self.Sign[i])
 
         # Lidar initialization
         self.lidar = self.getDevice("LDS-01")
@@ -77,11 +80,12 @@ class UAV(RobotSupervisor):
         """
         # 400 x 240 x 3
         camera_data_whc = np.array(self.camera.getImageArray())
+        # print(camera_data_whc.shape)
         # 3 x 240 x 400
         camera_data_chw = np.transpose(camera_data_whc, (2, 1, 0))
         rpy_data = np.array(self.imu.getRollPitchYaw())
 
-        return camera_data_chw, rpy_data
+        return [camera_data_chw, rpy_data]
 
     def get_reward(self, action=None):
         """
@@ -91,7 +95,18 @@ class UAV(RobotSupervisor):
         :return: the reward
         """
         # TODO
-        pass
+        return 1
+    
+    @staticmethod
+    def RestrictAngle(angle):
+        """
+        restrict the angle to [-pi, pi]
+        """
+        while angle > np.pi:
+            angle = angle - 2 * np.pi
+        while angle < -np.pi:
+            angle = angle + 2 * np.pi
+        return angle
 
     def is_done(self):
         """
@@ -102,11 +117,12 @@ class UAV(RobotSupervisor):
         # the sum of angle out of 30 degrees, stop
         rpy = self.imu.getRollPitchYaw()
         threshold_rpy = np.pi / 6
-        if abs(rpy[0]) + abs(rpy[1]) + abs(rpy[2]) > threshold_rpy:
+        # print(rpy)
+        if abs(rpy[0]) + abs(rpy[1]) + abs(self.RestrictAngle(rpy[2] - np.pi)) > threshold_rpy:
             return True
 
         # TODO
-        pass
+        return False
 
     def solved(self):
         """
@@ -129,7 +145,7 @@ class UAV(RobotSupervisor):
         
         :return: the default observation
         """
-        return np.zeros((self.camera.getWidth(), self.camera.getHeight(), 3))
+        return [np.zeros((3, self.camera.getHeight(), self.camera.getWidth())), np.zeros((3,))]
 
     def apply_action(self, action):
         """
@@ -138,9 +154,10 @@ class UAV(RobotSupervisor):
         :param action: the action to be executed
         """
         action = action[0]
+        print("action: ", action)
         for i in range(4):
             self.motors[i].setPosition(np.inf)
-            self.motors[i].setVelocity(action[i])
+            self.motors[i].setVelocity(int(action[i]) * self.Sign[i])
 
     def render(self, mode='human'):
         """

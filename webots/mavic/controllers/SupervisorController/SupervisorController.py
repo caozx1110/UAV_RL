@@ -27,16 +27,17 @@ while not solved and episodeCount < episodeLimit:
         # Save the current state transition in agent's memory
         trans = Transition(observation, selectedAction, actionProb, reward, newObservation)
         agent.storeTransition(trans)
+        # print(done)
         if done:
             # Save the episode's score
-            env.episodeScoreList.append(env.episodeScore)
-            agent.trainStep(batchSize=step)
+            env.EpisodeScoreList.append(env.EpisodeScore)
+            agent.trainStep(batchSize=step + 1)
             solved = env.solved()  # Check whether the task is solved
             break
 
-        env.episodeScore += reward  # Accumulate episode reward
+        env.EpisodeScore += reward  # Accumulate episode reward
         observation = newObservation  # observation for next step is current step's newObservation
-    print("Episode #", episodeCount, "score:", env.episodeScore)
+    print("Episode #", episodeCount, "score:", env.EpisodeScore)
     episodeCount += 1  # Increment episode counter
 
 if not solved:

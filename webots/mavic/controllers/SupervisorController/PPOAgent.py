@@ -1,3 +1,4 @@
+from this import s
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -62,6 +63,7 @@ class PPOAgent:
         :type type_: str, optional
         """
         for i in range(2):
+            # agentInput[i] = from_numpy(np.array(agentInput[i])).float().unsqueeze(0)  # Add batch dimension with unsqueeze
             agentInput[i] = from_numpy(np.array(agentInput[i])).float().unsqueeze(0)  # Add batch dimension with unsqueeze
         
         if self.use_cuda:
@@ -70,15 +72,11 @@ class PPOAgent:
 
         with no_grad():
             mu, sigma = self.actor_net(agentInput[0], agentInput[1])
-            # for i in range(4):
-            #     dis = torch.distributions.normal.Normal(mu, sigma)        # 构建分布
-            #     action = dis.sample()   # 采样出一个动作
-            #     action_log_prob = dis.log_prob(action)
-            #     # append
-            #     action_list.append(action)
-            #     action_prob_list.append(action_log_prob)
+            # print(mu, sigma)
+            mu, sigma = mu.squeeze(dim=0), sigma.squeeze(dim=0)
             dis = torch.distributions.MultivariateNormal(mu, torch.diag_embed(sigma))   # 构建分布
             action = dis.sample()   # 采样出一个动作
+            # print(type(action), action.shape)
             action_log_prob = dis.log_prob(action)  # 计算动作的概率
         
         return action, action_log_prob
@@ -136,8 +134,12 @@ class PPOAgent:
             batchSize = self.batch_size
 
         # Extract states, actions, rewards and action probabilities from transitions in buffer
-        state = tensor([t.state for t in self.buffer], dtype=torch_float)
-        action = tensor([t.action for t in self.buffer], dtype=torch_long).view(-1, 1)
+        # state_img = torch.cat([t.state[0].unsqueeze(0) for t in self.buffer], 0)
+        # state_imu = torch.cat([t.state[1].unsqueeze(0) for t in self.buffer], 0)
+        state_img = torch.cat([t.state[0] for t in self.buffer], 0)
+        state_imu = torch.cat([t.state[1] for t in self.buffer], 0)
+
+        action = torch.cat([t.action.unsqueeze(0) for t in self.buffer], 0)  #TODO: check if this is correct
         reward = [t.reward for t in self.buffer]
         old_action_log_prob = tensor([t.a_log_prob for t in self.buffer], dtype=torch_float).view(-1, 1)
 
@@ -151,7 +153,7 @@ class PPOAgent:
 
         # Send everything to cuda if used
         if self.use_cuda:
-            state, action, old_action_log_prob = state.cuda(), action.cuda(), old_action_log_prob.cuda()
+            state_img, state_imu, action, old_action_log_prob = state_img.cuda(), state_imu.cuda(), action.cuda(), old_action_log_prob.cuda()
             Gt = Gt.cuda()
 
         # Repeat the update procedure for ppo_update_iters
@@ -160,13 +162,26 @@ class PPOAgent:
             for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), batchSize, False):
                 # Calculate the advantage at each step
                 Gt_index = Gt[index].view(-1, 1)
-                V = self.critic_net(state[index])
+                V = self.critic_net(state_img[index], state_imu[index])
                 delta = Gt_index - V
                 advantage = delta.detach()
 
                 # Get the current probabilities
                 # Apply past actions with .gather()
-                action_prob = self.actor_net(state[index]).gather(1, action[index])  # new policy
+                # TODO: prob
+                # action_prob = self.actor_net(state_img[index], state_imu[index]).gather(1, action[index])  # new policy
+                mu, sigma = self.actor_net(state_img[index], state_imu[index])
+                # action_prob = []
+                # for i in range(mu.shape[0]):
+                #     dis = torch.distributions.MultivariateNormal(mu[i], torch.diag_embed(sigma[i]))
+                #     action_prob.append(dis.log_prob(action[i]))
+
+                # print(torch.diag_embed(sigma))    # check: ok
+                # seems like this can generate a list of distributions
+                dis = torch.distributions.MultivariateNormal(mu, torch.diag_embed(sigma))
+                action_prob = dis.log_prob(action[index]).view(-1, 1)
+
+                # print("action prob shape", action_prob.shape)
 
                 # PPO
                 ratio = (action_prob / old_action_log_prob[index])  # Ratio between current and old policy probabilities
@@ -227,16 +242,22 @@ class Actor(nn.Module):
     def forward(self, img, imu):
         # img
         img = self.img_channel(img)
-        img = img.view(img.size(0), -1) # 24
+        img = img.view(img.shape[0], -1) # 24
+        # 1 x 24
         # imu
         imu = self.imu_channel(imu) # 12
+        imu = imu.view(imu.shape[0], -1)
+        # 1 x 12
+        # print(img.shape, imu.shape)
         # cat
         img_imu = torch.cat((img, imu), 1)
         # sigma & mu
-        sigma = self.fc1(img_imu)   # sigma[4]
-        mu = self.fc2(img_imu)      # mu[4]
+        mu = torch.tanh(self.fc1(img_imu)) * 100 + 100   # mu[4], [0, 200]
+        sigma = F.softplus(self.fc2(img_imu)) + 0.001      # sigma[4], >0
+        # print(sigma.shape)
+        # print(mu.shape)
 
-        return sigma, mu
+        return mu, sigma
 
 
 class Critic(nn.Module):
@@ -274,9 +295,13 @@ class Critic(nn.Module):
     def forward(self, img, imu):
         # img
         img = self.img_channel(img)
-        img = img.view(img.size(0), -1) # 24
+        img = img.view(img.shape[0], -1) # 24
+        # 1 x 24
         # imu
         imu = self.imu_channel(imu) # 12
+        imu = imu.view(imu.shape[0], -1)
+        # 1 x 12
+        # print(img.shape, imu.shape)
         # cat
         img_imu = torch.cat((img, imu), 1)
         # value
