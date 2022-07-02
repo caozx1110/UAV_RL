@@ -22,7 +22,7 @@ class PPOAgent:
     It uses the Actor and Critic neural network classes defined below.
     """
 
-    def __init__(self, numberOfInputs, numberOfActorOutputs, clip_param=0.2, max_grad_norm=0.5, ppo_update_iters=5,
+    def __init__(self, numberOfInputs=None, numberOfActorOutputs=None, clip_param=0.2, max_grad_norm=0.5, ppo_update_iters=5,
                  batch_size=8, gamma=0.99, use_cuda=False, actor_lr=0.001, critic_lr=0.003, seed=None):
         super().__init__()
         if seed is not None:

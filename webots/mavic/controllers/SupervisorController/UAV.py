@@ -14,7 +14,7 @@ class UAV(RobotSupervisor):
         super().__init__()
         '''robot initialization'''
         self.robot = self.getSelf()
-        self.timestep = int(self.robot.getBasicTimeStep())
+        self.timestep = int(self.getBasicTimeStep())
 
         # device initialization
         self.camera = self.getDevice('camera')
